@@ -227,20 +227,6 @@ def _draw_controls(ax, i, gate, labels, gate_grid, wire_grid, plot_params, measu
             wire_grid[max_wire],
             plot_params,
         )
-        ismeasured = False
-        for index in control_indices:
-            if measured.get(index, 1000) < i:
-                ismeasured = True
-        if ismeasured:
-            dy = 0.04  # TODO: put in plot_params
-            _line(
-                ax,
-                gate_grid[i] + dy,
-                gate_grid[i] + dy,
-                wire_grid[min_wire],
-                wire_grid[max_wire],
-                plot_params,
-            )
 
         for ci in control_indices:
             x = gate_grid[i]
@@ -301,12 +287,8 @@ def _draw_target(ax, i, gate, labels, gate_grid, wire_grid, plot_params):
     x = gate_grid[i]
     target_index = _get_flipped_index(target, labels)
     y = wire_grid[target_index]
-    if not symbol:
-        return
     if name in ["CNOT", "TOFFOLI"]:
         _oplus(ax, x, y, plot_params)
-    elif name == "CPHASE":
-        _cdot(ax, x, y, plot_params)
     elif name == "SWAP":
         _swapx(ax, x, y, plot_params)
     else:
@@ -611,13 +593,13 @@ def _process_gates(array_gates, nqubits):
             item += (init_label,)
 
             for qbit in gate._target_qubits:
-                if qbit is tuple:
+                if type(qbit) is tuple:
                     item += ("q_" + str(qbit[0]),)
                 else:
                     item += ("q_" + str(qbit),)
 
             for qbit in gate._control_qubits:
-                if qbit is tuple:
+                if type(qbit) is tuple:
                     item += ("q_" + str(qbit[0]),)
                 else:
                     item += ("q_" + str(qbit),)
@@ -638,10 +620,11 @@ def _plot_params(style: Union[dict, str, None]) -> dict:
         dict: Style configuration.
     """
     if not isinstance(style, dict):
-        try:
-            style = STYLE.get(style) if (style is not None) else STYLE["default"]
-        except AttributeError:
-            style = STYLE["default"]
+        style = (
+            STYLE.get(style)
+            if (style is not None and style in STYLE.keys())
+            else STYLE["default"]
+        )
 
     return style
 
@@ -719,7 +702,9 @@ def plot_circuit(circuit, scale=0.6, cluster_gates=True, style=None):
             fgates = None
 
             if cluster_gates:
-                fgates = _make_cluster_gates(_process_gates(gate.gates, circuit.nqubits))
+                fgates = _make_cluster_gates(
+                    _process_gates(gate.gates, circuit.nqubits)
+                )
             else:
                 fgates = _process_gates(gate.gates, circuit.nqubits)
 
