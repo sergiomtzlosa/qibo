@@ -3,7 +3,8 @@ import numpy as np
 from qibo.config import raise_error
 from qibo.models.evolution import StateEvolution
 from qibo.models.utils import vqe_loss
-
+from qibo import gates, models
+import random
 
 class VQE:
     """This class implements the variational quantum eigensolver algorithm.
@@ -98,6 +99,74 @@ class VQE:
                 if str(dtype) == "torch.float64"
                 else (lambda p, c, h: dtype(loss_func(p, c, h)))
             )
+        elif method == "spsa":
+
+            if "max_steps" not in options:
+                max_steps = 500
+            else:
+                max_steps = options["max_steps"]
+
+            if "rounds" not in options:
+                rounds = 3
+            else:
+                rounds = options["rounds"]
+
+            def expectation(qubits, rounds, thetas):
+                exp = []
+                for i in range(rounds):
+                    c = self.circuit.copy(True)
+                    #c.add(gates.M(*range(qubits)))
+                    c.set_parameters(thetas)
+                    state = c(nshots=1024).state(True)
+                    expectation_value = self.hamiltonian.expectation(state)
+                    exp.append(expectation_value)
+                return np.sum(exp)
+
+            def minimize(rounds, max_iter, thetas=None, save_steps = None):
+                cnt_qubits = int(np.log2(len(self.hamiltonian._matrix)))
+                if thetas is None:
+                    thetas = list(map(lambda x: random.random(), [0] * ((1+rounds)*cnt_qubits*2)))
+
+                # Creamos la clase del optimizador
+                optimizer = SPSA(a = 0.9,
+                                c = 1.0,
+                                A = max_steps,
+                                alpha = 0.602,
+                                gamma = 0.101,
+                                H = self.hamiltonian,
+                                loss_function = lambda t_thetas: expectation(cnt_qubits, rounds, t_thetas))
+
+                # Loop principal
+                for i in range(max_steps):
+                    thetas = optimizer.step(thetas)
+
+                    if save_steps is not None and i % save_steps == 0:
+                        callback(i, thetas, expectation(cnt_qubits,rounds, thetas))
+                        yield (i, thetas, expectation(cnt_qubits,rounds, thetas))
+
+                return (i, expectation(cnt_qubits, rounds, thetas), thetas)
+
+            # Creamos la clase del optimizador
+            optimizer = SPSA(a = 0.9,
+                             c = 1.0,
+                             A = max_steps,
+                             H = self.hamiltonian,
+                             alpha = 0.602,
+                             gamma = 0.101,
+                             loss_function = lambda t_thetas: expectation(rounds, t_thetas))
+
+            result = None
+            step_size = 3
+
+            energies = []
+            params = []
+            for step in minimize(rounds, max_steps, thetas = initial_state, save_steps = step_size):
+                params.append(step[1])
+                print('Step {step}. Current expectation value: {ev: .3f}'.format(step=step[0], ev = step[2]))
+                energies.append(step[2])
+                result = step
+
+            return (max_steps, energies[len(energies) - 1], params)
         elif method != "sgd":
             loss = lambda p, c, h: self.hamiltonian.backend.to_numpy(loss_func(p, c, h))
         result, parameters, extra = self.optimizers.optimize(
@@ -668,3 +737,41 @@ class FALQON(QAOA):
         final_loss = _loss(parameters, self, self.hamiltonian)
         extra = {"energies": energy, "callbacks": callback_result}
         return final_loss, parameters, extra
+
+
+class SPSA:
+
+    def __init__(self, a, c, A, alpha, gamma, H, loss_function):
+        # Inicializamos parámetros de ganancia y factores de decaímiento
+        self.a = a
+        self.c = c
+        self.A = A
+        self.alpha = alpha
+        self.gamma = gamma
+        self.loss_function = loss_function
+
+        # Contador
+        self.t = 0
+
+    def step(self, current_estimate):
+        # Obtenemos los valores actuales para las secuencias de ganancia
+        a_t = self.a / (self.t + 1 + self.A)**self.alpha
+        c_t = self.c / (self.t + 1)**self.gamma
+
+        # Vector de perturbaciones aleatorias de la distribución de Bernoulli
+        delta = np.random.randint(0, 2, np.array(current_estimate).shape) * 2 - 1
+
+        # Medimos la función de pérdida en las perturbaciones
+        loss_plus = self.loss_function(current_estimate + delta * c_t)
+        loss_minus = self.loss_function(current_estimate - delta * c_t)
+
+        # Estimación del gradiente
+        g_t = (loss_plus - loss_minus) / (2.0 * delta * c_t)
+
+        # Actualizamos la estimación del parámetro
+        current_estimate = current_estimate - a_t * g_t
+
+        # Incrementamos el contador
+        self.t +=1
+
+        return current_estimate
