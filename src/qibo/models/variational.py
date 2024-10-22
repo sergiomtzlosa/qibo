@@ -742,7 +742,7 @@ class FALQON(QAOA):
 class SPSA:
 
     def __init__(self, a, c, A, alpha, gamma, H, loss_function):
-        # Inicializamos parámetros de ganancia y factores de decaímiento
+        # Init gain parms and decay factors
         self.a = a
         self.c = c
         self.A = A
@@ -750,28 +750,27 @@ class SPSA:
         self.gamma = gamma
         self.loss_function = loss_function
 
-        # Contador
+        # Counter
         self.t = 0
 
     def step(self, current_estimate):
-        # Obtenemos los valores actuales para las secuencias de ganancia
+        # Current values for gain sequences
         a_t = self.a / (self.t + 1 + self.A)**self.alpha
         c_t = self.c / (self.t + 1)**self.gamma
 
-        # Vector de perturbaciones aleatorias de la distribución de Bernoulli
+        # Random perturbation vector from Bernoulli distribution
         delta = np.random.randint(0, 2, np.array(current_estimate).shape) * 2 - 1
 
-        # Medimos la función de pérdida en las perturbaciones
+        # Measure the perturbation losses
         loss_plus = self.loss_function(current_estimate + delta * c_t)
         loss_minus = self.loss_function(current_estimate - delta * c_t)
 
-        # Estimación del gradiente
+        # Gradiente estimation
         g_t = (loss_plus - loss_minus) / (2.0 * delta * c_t)
 
-        # Actualizamos la estimación del parámetro
+        # Update the parameter estimation
         current_estimate = current_estimate - a_t * g_t
 
-        # Incrementamos el contador
         self.t +=1
 
         return current_estimate
